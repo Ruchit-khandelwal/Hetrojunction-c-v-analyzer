@@ -1,0 +1,113 @@
+import tkinter as tk
+from tkinter import filedialog, messagebox, Toplevel
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from scipy.constants import epsilon_0, elementary_charge as q
+from scipy.stats import linregress
+
+# ========================= MAIN GUI =========================
+root = tk.Tk()
+root.title("C–V Graph Analyzer - Built-in Potential & Doping (Excel Input)")
+root.geometry("900x600")
+
+tk.Label(root, text="Relative Permittivity (εᵣ):").pack()
+epsr_entry = tk.Entry(root, width=20)
+epsr_entry.insert(0, "11.7")  # Default for Silicon
+epsr_entry.pack()
+
+def show_results_window(file_path, slope, intercept, V_bi, N_D, eps_r, epsilon, r_squared, V, C):
+    result_win = Toplevel(root)
+    result_win.title(" Computation Results - Step-by-Step")
+    result_win.geometry("700x650")
+    result_frame = tk.Frame(result_win)
+    result_frame.pack(padx=20, pady=20)
+
+    # Carrier concentrations at 300K (assuming intrinsic carrier conc. for Si: ni ≈ 1.5e10 cm⁻³ = 1.5e16 m⁻³)
+    ni = 1.5e16  # m⁻³
+    n = N_D  # For n-type, electron ≈ doping
+    p = ni**2 / n
+
+    tk.Label(result_frame, text=" File Loaded:", font=('Arial', 10, 'bold')).pack(anchor='w')
+    tk.Label(result_frame, text=f"{file_path}").pack(anchor='w')
+
+    tk.Label(result_frame, text="\n Input Parameters", font=('Arial', 10, 'bold')).pack(anchor='w')
+    tk.Label(result_frame, text=f"Relative Permittivity (εᵣ): {eps_r}").pack(anchor='w')
+    tk.Label(result_frame, text=f"Vacuum Permittivity (ε₀): {epsilon_0:.4e} F/m").pack(anchor='w')
+    tk.Label(result_frame, text=f"Total Permittivity (ε): {epsilon:.4e} F/m").pack(anchor='w')
+
+    tk.Label(result_frame, text="\n📐 Linear Regression (1/C² vs V)", font=('Arial', 10, 'bold')).pack(anchor='w')
+    tk.Label(result_frame, text=f"Slope (m): {slope:.4e} 1/(F²·V)").pack(anchor='w')
+    tk.Label(result_frame, text=f"Intercept (b): {intercept:.4e} 1/F²").pack(anchor='w')
+    tk.Label(result_frame, text=f"R² Value: {r_squared:.4f}").pack(anchor='w')
+
+    tk.Label(result_frame, text="\n Built-in Potential Calculation", font=('Arial', 10, 'bold')).pack(anchor='w')
+    tk.Label(result_frame, text=f"V_bi = -Intercept / Slope").pack(anchor='w')
+    tk.Label(result_frame, text=f"V_bi = -({intercept:.4e}) / ({slope:.4e}) = {V_bi:.4f} V").pack(anchor='w')
+
+    tk.Label(result_frame, text="\n Doping Concentration (Donor - N_D)", font=('Arial', 10, 'bold')).pack(anchor='w')
+    tk.Label(result_frame, text="N_D = 2 / (q × ε × slope)").pack(anchor='w')
+    tk.Label(result_frame, text=f"N_D = 2 / ({q:.4e} × {epsilon:.4e} × {slope:.4e}) = {N_D:.4e} m⁻³").pack(anchor='w')
+
+    tk.Label(result_frame, text="\n Carrier Concentration (at T = 300K)", font=('Arial', 10, 'bold')).pack(anchor='w')
+    tk.Label(result_frame, text=f"Assumed intrinsic concentration ni = 1.5 × 10¹⁶ m⁻³").pack(anchor='w')
+    tk.Label(result_frame, text=f"n ≈ N_D = {n:.4e} m⁻³").pack(anchor='w')
+    tk.Label(result_frame, text=f"p = ni² / n = {p:.4e} m⁻³").pack(anchor='w')
+
+    tk.Label(result_frame, text="\n All values successfully derived from uploaded data.", fg="green").pack(anchor='w')
+
+def load_excel_and_analyze():
+    try:
+        file_path = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx")])
+        if not file_path:
+            return
+
+        try:
+            df = pd.read_excel(file_path, engine='openpyxl')
+        except ImportError:
+            messagebox.showerror("Missing Dependency", "Install 'openpyxl' via pip to read Excel files.")
+            return
+
+        if df.shape[1] < 2:
+            raise ValueError("Excel must have at least 2 columns (Voltage, Capacitance)")
+
+        V = df.iloc[:, 0].dropna().values.astype(float)
+        C = df.iloc[:, 1].dropna().values.astype(float)
+
+        if len(V) != len(C):
+            raise ValueError("Voltage and Capacitance must be the same length")
+
+        eps_r = float(epsr_entry.get())
+        epsilon = eps_r * epsilon_0
+        C_inv_squared = 1 / (C ** 2)
+
+        # Linear regression
+        slope, intercept, r_value, _, _ = linregress(V, C_inv_squared)
+        V_bi = -intercept / slope
+        N_D = 2 / (q * epsilon * slope)
+
+        # Show results in new window
+        show_results_window(file_path, slope, intercept, V_bi, N_D, eps_r, epsilon, r_value**2, V, C)
+
+        # Plotting
+        plt.figure(figsize=(9, 6))
+        plt.scatter(V, C_inv_squared, label='Data Points', color='blue')
+        fit_line = slope * V + intercept
+        plt.plot(V, fit_line, 'r--', label=f'Fit Line\ny = {slope:.2e}V + {intercept:.2e}')
+        plt.axhline(0, color='gray', linestyle=':')
+        plt.axvline(V_bi, color='green', linestyle='--', label=f'V_bi = {V_bi:.2f} V')
+        plt.xlabel("Voltage (V)")
+        plt.ylabel("1 / C² (1/F²)")
+        plt.title("1 / C² vs Voltage with Linear Fit")
+        plt.grid(True)
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
+
+    except Exception as e:
+        messagebox.showerror("Error", str(e))
+
+# Upload Button
+tk.Button(root, text=" Upload Excel (.xlsx) and Analyze", command=load_excel_and_analyze).pack(pady=20)
+
+root.mainloop()
